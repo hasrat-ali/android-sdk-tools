@@ -1,0 +1,107 @@
+diff --git a/base/libs/androidfw/Util.cpp b/base/libs/androidfw/Util.cpp
+index c73b18069..1f17fda0e 100644
+--- a/base/libs/androidfw/Util.cpp
++++ b/base/libs/androidfw/Util.cpp
+@@ -68,11 +68,8 @@ std::string Utf16ToUtf8(StringPiece16 utf16) {
+     return {};
+   }
+ 
+-  std::string utf8;
+-  utf8.resize_and_overwrite(utf8_length, [&utf16](char* data, size_t size) {
+-    utf16_to_utf8(utf16.data(), utf16.length(), data, size + 1);
+-    return size;
+-  });
++  std::string utf8(utf8_length, '\0');
++  utf16_to_utf8(utf16.data(), utf16.length(), utf8.data(), utf8_length + 1);
+   return utf8;
+ }
+ 
+diff --git a/base/libs/androidfw/include/androidfw/Asset.h b/base/libs/androidfw/include/androidfw/Asset.h
+index 87dc5a776..f56ef2587 100644
+--- a/base/libs/androidfw/include/androidfw/Asset.h
++++ b/base/libs/androidfw/include/androidfw/Asset.h
+@@ -25,7 +25,9 @@
+ #include <functional>
+ #include <memory>
+ #include <optional>
++#include <variant>
+ 
++#include <android-base/mapped_file.h>
+ #include <android-base/unique_fd.h>
+ #include <util/map_ptr.h>
+ 
+diff --git a/base/libs/androidfw/include/androidfw/CombinedIterator.h b/base/libs/androidfw/include/androidfw/CombinedIterator.h
+index 4ff6a7d7e..377146f9f 100644
+--- a/base/libs/androidfw/include/androidfw/CombinedIterator.h
++++ b/base/libs/androidfw/include/androidfw/CombinedIterator.h
+@@ -59,7 +59,7 @@ struct RefPair : BaseRefPair<It1, It2> {
+   std::strong_ordering operator<=>(const Value& other) const {
+     return this->first <=> other.first;
+   }
+-  friend void swap(RefPair& l, RefPair& r) {
++  friend void swap(RefPair l, RefPair r) {
+     using std::swap;
+     swap(l.first, r.first);
+     swap(l.second, r.second);
+diff --git a/base/libs/androidfw/include/androidfw/LocaleDataLookup.h b/base/libs/androidfw/include/androidfw/LocaleDataLookup.h
+index 5a24e832b..4fcda7560 100644
+--- a/base/libs/androidfw/include/androidfw/LocaleDataLookup.h
++++ b/base/libs/androidfw/include/androidfw/LocaleDataLookup.h
+@@ -25,12 +25,10 @@ namespace android {
+ constexpr size_t SCRIPT_LENGTH = 4;
+ 
+ constexpr inline uint32_t packLocale(const char* language, const char* region) {
+-    const unsigned char* lang = reinterpret_cast<const unsigned char*>(language);
+-    const unsigned char* reg = reinterpret_cast<const unsigned char*>(region);
+-    return (static_cast<uint32_t>(lang[0]) << 24u) |
+-            (static_cast<uint32_t>(lang[1]) << 16u) |
+-            (static_cast<uint32_t>(reg[0]) << 8u) |
+-            static_cast<uint32_t>(reg[1]);
++    return (static_cast<uint32_t>(static_cast<uint8_t>(language[0])) << 24u) |
++            (static_cast<uint32_t>(static_cast<uint8_t>(language[1])) << 16u) |
++            (static_cast<uint32_t>(static_cast<uint8_t>(region[0])) << 8u) |
++            static_cast<uint32_t>(static_cast<uint8_t>(region[1]));
+ }
+ 
+ constexpr inline uint32_t dropRegion(uint32_t packed_locale) {
+@@ -42,11 +40,10 @@ constexpr inline bool hasRegion(uint32_t packed_locale) {
+ }
+ 
+ constexpr inline uint32_t packScript(const char* script) {
+-    const unsigned char* s = reinterpret_cast<const unsigned char*>(script);
+-    return ((static_cast<uint32_t>(s[0]) << 24u) |
+-            (static_cast<uint32_t>(s[1]) << 16u) |
+-            (static_cast<uint32_t>(s[2]) <<  8u) |
+-            static_cast<uint32_t>(s[3]));
++    return ((static_cast<uint32_t>(static_cast<uint8_t>(script[0])) << 24u) |
++            (static_cast<uint32_t>(static_cast<uint8_t>(script[1])) << 16u) |
++            (static_cast<uint32_t>(static_cast<uint8_t>(script[2])) <<  8u) |
++            static_cast<uint32_t>(static_cast<uint8_t>(script[3])));
+ }
+ 
+ /**
+diff --git a/base/libs/androidfw/include/androidfw/ResourceTypes.h b/base/libs/androidfw/include/androidfw/ResourceTypes.h
+index 2c373e058..0cd7eb050 100644
+--- a/base/libs/androidfw/include/androidfw/ResourceTypes.h
++++ b/base/libs/androidfw/include/androidfw/ResourceTypes.h
+@@ -20,6 +20,7 @@
+ #pragma once
+ 
+ #include <android-base/expected.h>
++#include <android-base/mapped_file.h>
+ #include <android-base/unique_fd.h>
+ #include <android/configuration.h>
+ #include <androidfw/Asset.h>
+diff --git a/base/tools/aapt2/cmd/Compile.cpp b/base/tools/aapt2/cmd/Compile.cpp
+index bea9acb39..4a43a1400 100644
+--- a/base/tools/aapt2/cmd/Compile.cpp
++++ b/base/tools/aapt2/cmd/Compile.cpp
+@@ -847,7 +847,7 @@ int Compile(IAaptContext* context, io::IFileCollection* inputs, IArchiveWriter*
+ 
+     // Treat periods as a reserved character that should not be present in a file name
+     // Legacy support for AAPT which did not reserve periods
+-    if (compile_func != &CompileFile && !options.legacy_mode && path_data.name.contains('.')) {
++    if (compile_func != &CompileFile && !options.legacy_mode && path_data.name.find('.') != std::string::npos) {
+       error = true;
+       context->GetDiagnostics()->Error(android::DiagMessage(file->GetSource())
+                                        << "file name cannot contain '.' other than for"

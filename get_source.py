@@ -94,6 +94,10 @@ def patches():
 
     shutil.copy2(VERSION_HEADER, ROOT / 'src/soong/cc/libbuildversion/include')
 
+    androidfw_inc = ROOT / 'src/base/libs/androidfw/include'
+    androidfw_inc.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'patches/misc/android_content_res.h', androidfw_inc)
+
     aapt2 = 'src/base/tools/aapt2/'
     replace_in_file(aapt2 + 'ApkInfo.proto', 'frameworks/base/tools/aapt2/Resources.proto', 'Resources.proto')
     replace_in_file(aapt2 + 'Resources.proto', 'frameworks/base/tools/aapt2/Configuration.proto', 'Configuration.proto')
