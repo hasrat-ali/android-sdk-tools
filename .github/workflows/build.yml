@@ -14,6 +14,14 @@ on:
         type: choice
         options: [ ndk, zig ]
         default: ndk
+      aosp_branch:
+        description: 'AOSP tag or branch'
+        type: string
+        default: 'android17-release'
+      targets:
+        description: 'Targets to build (space-separated)'
+        type: string
+        default: 'aapt2 zipalign'
       release:
         description: 'publish to GitHub Releases'
         type: boolean
@@ -28,6 +36,8 @@ env:
   NDK_VERSION: r27c
   ZIG_VERSION: 0.13.0
   CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+  AOSP_BRANCH: ${{ inputs.aosp_branch || 'android17-release' }}
+  TARGETS: ${{ inputs.targets || 'aapt2 zipalign' }}
 
 jobs:
   # read the version, fetch the AOSP sources and build the host protoc once,
@@ -79,7 +89,7 @@ jobs:
 
       - name: Fetch sources
         if: steps.cache.outputs.cache-hit != 'true'
-        run: python3 get_source.py --tags "platform-tools-${{ steps.version.outputs.version }}"
+        run: python3 get_source.py --tags "${{ env.AOSP_BRANCH }}"
 
       - name: Build host protoc
         if: steps.cache.outputs.cache-hit != 'true'
@@ -155,13 +165,31 @@ jobs:
             --arch "${{ matrix.arch }}" \
             --link "$LINK" \
             --protoc host-tools/protoc \
+            --target $TARGETS \
             --output-dir dist
+
+          # Map architecture to standard Android ABI name
+          case "${{ matrix.arch }}" in
+            aarch64) ABI="arm64-v8a" ;;
+            arm)     ABI="armeabi-v7a" ;;
+            i686)    ABI="x86" ;;
+            x86_64)  ABI="x86_64" ;;
+            *)       ABI="${{ matrix.arch }}" ;;
+          esac
+
+          # Copy standalone binaries with ABI names for direct download
+          for tool in $TARGETS; do
+            bin="build/${TOOLCHAIN}-${LINK}-${{ matrix.arch }}/bin/$tool"
+            if [ -f "$bin" ]; then
+              cp "$bin" "dist/${tool}-${ABI}"
+            fi
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-sdk-tools-${{ env.LINK }}-${{ matrix.arch }}
-          path: dist/android-sdk-tools-${{ env.LINK }}-${{ matrix.arch }}.zip
+          path: dist/*
           if-no-files-found: error
 
   release:
@@ -201,8 +229,8 @@ jobs:
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "release $TAG exists, PLATFORM_TOOLS_VERSION unchanged: overwrite the assets"
             gh release edit "$TAG" --title "$TITLE" --notes-file notes.md
-            gh release upload "$TAG" dist/*.zip --clobber
+            gh release upload "$TAG" dist/* --clobber
           else
             echo "create release $TAG"
-            gh release create "$TAG" dist/*.zip --title "$TITLE" --notes-file notes.md --verify-tag
+            gh release create "$TAG" dist/* --title "$TITLE" --notes-file notes.md --verify-tag
           fi
